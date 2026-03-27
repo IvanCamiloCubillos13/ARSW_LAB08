@@ -11,6 +11,7 @@ module "vnet" {
   location            = azurerm_resource_group.rg.location
   prefix              = var.prefix
   tags                = var.tags
+  allow_ssh_from_cidr = var.allow_ssh_from_cidr
 }
 
 module "compute" {
