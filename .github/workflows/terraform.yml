@@ -1,0 +1,153 @@
+name: Terraform CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "modules/**"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Acción a ejecutar"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - apply
+          - destroy
+
+env:
+  TF_VERSION: "1.6.0"
+  WORKING_DIR: ./infra
+  VAR_FILE: env/dev.tfvars
+
+jobs:
+  # ── Job 1: Se ejecuta en cada Pull Request ─────────────────────
+  terraform-check:
+    name: "fmt · validate · plan"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform ${{ env.TF_VERSION }}
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt (verificar formato)
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform fmt -check -recursive
+
+      - name: terraform init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform init -backend=false
+
+      - name: terraform validate
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform validate
+
+      - name: terraform init con backend remoto
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.TF_BACKEND_RG }}" \
+            -backend-config="storage_account_name=${{ secrets.TF_BACKEND_SA }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=lab8.tfstate"
+
+      - name: terraform plan
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform plan \
+            -var-file="${{ env.VAR_FILE }}" \
+            -var "ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
+            -no-color \
+            -out=plan.tfplan
+        continue-on-error: false
+
+      - name: Mostrar resumen del plan en el PR
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const output = `### Terraform Plan 📋
+            **Resultado:** \`${{ job.status }}\`
+            **Rama:** \`${{ github.head_ref }}\`
+            **Workflow:** [Ver logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            > Revisa los logs del job para ver el detalle del plan.`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+  # ── Job 2: Apply manual via workflow_dispatch ──────────────────
+  terraform-apply:
+    name: "terraform ${{ github.event.inputs.action }}"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: production
+
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform ${{ env.TF_VERSION }}
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.TF_BACKEND_RG }}" \
+            -backend-config="storage_account_name=${{ secrets.TF_BACKEND_SA }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=lab8.tfstate"
+
+      - name: terraform fmt
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform fmt -recursive
+
+      - name: terraform validate
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform validate
+
+      - name: terraform apply
+        if: github.event.inputs.action == 'apply'
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform apply \
+            -var-file="${{ env.VAR_FILE }}" \
+            -var "ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
+            -auto-approve
+
+      - name: terraform destroy
+        if: github.event.inputs.action == 'destroy'
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform destroy \
+            -var-file="${{ env.VAR_FILE }}" \
+            -var "ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
+            -auto-approve
