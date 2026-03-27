@@ -106,3 +106,12 @@ en la región `eastus`:
 > ejecutar `terraform destroy` al finalizar para evitar cargos innecesarios.
 
 Referencia: [Azure Pricing Calculator](https://azure.microsoft.com/en-us/pricing/calculator)
+
+Despues de hacer un archivo cloud-init.yaml para que nginx se instale solo en cada VM, en el módulo compute se crearon 2 NICs y 2 VMs con Ubuntu 22.04 usando clave SSH sin contraseñas, luego en el Load Balancer se configuró una IP pública fija, un Backend Pool con las 2 VMs, un Health Probe por TCP en el puerto 80 y la regla de balanceo también en el puerto 80, además se armó un workflow en GitHub Actions con un job automático en PRs que corre fmt, validate y plan, y otro manual para apply y destroy, al final se probó con curl y las respuestas iban alternando entre lab8-vm-0 y lab8-vm-1 confirmando que todo funcionaba bien, y se terminó con un terraform destroy para limpiar los recursos como se muetsran en el video adjunto, archivo adjunto y las siguientes imagenes:
+
+
+![](images/0.png)
+![](images/1.png)
+![](images/2.png)
+![](images/3.png)
+![](images/4.png)
